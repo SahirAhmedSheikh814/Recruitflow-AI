@@ -7,7 +7,8 @@ import { getMyApplications, ApiError, type ApplicationSummary } from "@/lib/api"
 import type { Job } from "@/lib/jobs";
 import { Badge } from "@/components/ui/Badge";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7860";
+// Client component → call the same-origin proxy (see next.config.ts rewrites).
+const API_URL = "/backend";
 
 /** Fetch open roles directly from the public jobs endpoint (no auth needed). */
 async function fetchOpenJobs(): Promise<Job[]> {

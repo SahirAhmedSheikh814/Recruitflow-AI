@@ -2,7 +2,10 @@
 
 import { Button } from "@/components/ui/Button";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7860";
+// Same-origin proxy path (see next.config.ts rewrites). Starting the OAuth flow
+// on THIS domain means Google's callback response — and the auth cookies it sets
+// — are first-party to Vercel, so proxy.ts can read them afterwards.
+const API_URL = "/backend";
 
 export function GoogleButton({ label = "Continue with Google" }: { label?: string }) {
   return (

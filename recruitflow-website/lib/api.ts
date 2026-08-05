@@ -8,7 +8,18 @@
  * when their 15-minute access token expires.
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7860";
+/**
+ * Backend base URL.
+ *
+ * In the browser we call the SAME origin via the `/backend/*` rewrite (see
+ * next.config.ts) so auth cookies are first-party to this Vercel domain and are
+ * readable by proxy.ts. On the server (should this module ever run there) we use
+ * the absolute backend URL, since a relative path has no host server-side.
+ */
+const API_URL =
+  typeof window === "undefined"
+    ? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7860"
+    : "/backend";
 
 /**
  * Which portal this frontend instance is. Each of the three dev servers sets
@@ -259,7 +270,10 @@ export function getPipeline(filters: PipelineFilters = {}) {
 
 /** Open a live WebSocket to the ATS event stream. Returns the socket. */
 export function openPipelineSocket(): WebSocket {
-  const base = API_URL.replace(/^http/, "ws");
+  // WebSockets can't traverse the HTTP `/backend` rewrite, so connect straight
+  // to the backend origin (no cookie needed for the read-only ATS stream).
+  const origin = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7860";
+  const base = origin.replace(/^http/, "ws");
   return new WebSocket(`${base}/ats/ws`);
 }
 

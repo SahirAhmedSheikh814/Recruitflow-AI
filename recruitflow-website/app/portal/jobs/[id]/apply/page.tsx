@@ -7,7 +7,8 @@ import { notFound } from "next/navigation";
 import type { Job } from "@/lib/jobs";
 import { ApplyForm } from "@/components/site/ApplyForm";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7860";
+// Client component → call the same-origin proxy (see next.config.ts rewrites).
+const API_URL = "/backend";
 
 async function fetchJob(id: string): Promise<Job | null> {
   const res = await fetch(`${API_URL}/jobs/${id}`, { cache: "no-store" });
