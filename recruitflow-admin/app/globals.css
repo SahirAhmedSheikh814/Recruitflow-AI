@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Brand */
+  --color-primary: #4a6cf7;
+
+  /* Status badges */
+  --color-shortlisted: #16a34a;
+  --color-rejected:    #dc2626;
+  --color-pending:     #f59e0b;
+  --color-interview:   #2563eb;
+
+  /* Fonts */
+  --font-inter:   var(--font-inter);
+  --font-poppins: var(--font-poppins);
+  --font-serif:   "Times New Roman", Times, serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+}

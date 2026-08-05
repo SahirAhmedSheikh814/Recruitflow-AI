@@ -1,0 +1,59 @@
+# Render Blueprint — deploys the RecruitFlow backend as a Docker web service.
+# Persistent container: WebSockets (/ats/ws), the intake scheduler, and the
+# in-process event bus all run normally.
+#
+# NOTE: on the free plan the service spins down after ~15 min of inactivity and
+# takes ~40-60s to wake on the next request. The frontends retry patiently
+# through that window (see each repo's lib/api.ts), so users see a short wait
+# rather than a 502/504.
+services:
+  - type: web
+    name: recruitflow-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # App reads $PORT (injected by Render) via the Dockerfile CMD.
+      # Comma-separated production frontend origins for CORS, e.g.
+      # https://recruitflow-website.vercel.app,https://recruitflow-recruiter.vercel.app,https://recruitflow-admin.vercel.app
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: STORAGE_ENDPOINT
+        sync: false
+      - key: STORAGE_ACCESS_KEY
+        sync: false
+      - key: STORAGE_SECRET_KEY
+        sync: false
+      - key: STORAGE_BUCKET
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: IMAP_HOST
+        sync: false
+      - key: IMAP_USER
+        sync: false
+      - key: IMAP_PASSWORD
+        sync: false

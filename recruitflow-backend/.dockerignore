@@ -1,0 +1,27 @@
+# Render builds this repo from the Dockerfile. Keep the build context small:
+# never ship the local virtualenv, caches, or local dev storage into the image.
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Env & secrets — supplied via Railway service variables, never baked in
+.env
+*.pem
+
+# Local dev artifacts
+storage/
+*.sqlite3
+*.log
+
+# VCS & docs not needed at runtime
+.git/
+.gitignore
+README.md
+docs/
+
+# OS
+.DS_Store
