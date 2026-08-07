@@ -6,14 +6,18 @@ mechanism. It provides:
   * ``render_template(email_type, context)`` — returns (subject, html) for one of
     the six branded templates (application confirmation, shortlisting, interview
     invitation, reminder, offer, rejection);
-  * ``send_email(to, subject, html)`` — sends via SMTP (Resend/SendGrid/Gmail all
-    speak SMTP), returning True/False.
+  * ``send_email(to, subject, html)`` — delivers via the Resend HTTPS API,
+    returning True/False.
 
-Sending is **dormant until SMTP credentials are supplied** (SMTP_HOST/PORT/
-USER/PASSWORD/EMAIL_FROM) — mirroring the IMAP and Forms workers. Until then
-``is_configured()`` is False and ``send_email`` logs the intended message and
-returns False, so the pipeline (status transitions, ``email_logs`` audit) still
-runs end-to-end in development without a live mailbox.
+Sending is **dormant until a Resend API key is supplied** (RESEND_API_KEY) —
+mirroring the IMAP and Forms workers. Until then ``is_configured()`` is False and
+``send_email`` logs the intended message and returns False, so the pipeline
+(status transitions, ``email_logs`` audit) still runs end-to-end in development
+without a live provider.
+
+Why Resend and not SMTP: Render blocks outbound SMTP (ports 25/465/587), so
+Gmail/smtplib cannot open a connection from production (``OSError: [Errno 101]
+Network is unreachable``). Resend delivers over HTTPS (443), which is not blocked.
 
 Branding: primary colour #4A6CF7, Inter/Poppins headings, per the design system.
 """
@@ -21,10 +25,9 @@ from __future__ import annotations
 
 import logging
 import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Dict, Tuple
+
+import resend
 
 logger = logging.getLogger("recruitflow.email")
 
@@ -33,22 +36,28 @@ PRIMARY = "#4A6CF7"
 
 
 def is_configured() -> bool:
-    return bool(
-        os.environ.get("SMTP_HOST")
-        and os.environ.get("SMTP_USER")
-        and os.environ.get("SMTP_PASSWORD")
-    )
+    return bool(os.environ.get("RESEND_API_KEY"))
 
 
 def _from_address() -> str:
-    return os.environ.get("EMAIL_FROM") or os.environ.get("SMTP_USER") or "no-reply@recruitflow.ai"
+    """The sender address, driven entirely by the ``EMAIL_FROM`` env var.
+
+    For the testing phase this should be Resend's shared testing sender,
+    ``onboarding@resend.dev`` (used as the default when EMAIL_FROM is unset).
+    Once ``brandivemedsols.com`` is verified in Resend, set EMAIL_FROM to
+    ``sahirahmed@brandivemedsols.com`` — no code change needed.
+    """
+    return os.environ.get("EMAIL_FROM") or "onboarding@resend.dev"
 
 
 def send_email(to: str, subject: str, html: str) -> bool:
-    """Send one HTML email. Returns True on success, False if not sent.
+    """Send one HTML email via the Resend API. Returns True on success, False if
+    not sent.
 
-    When SMTP isn't configured this is a no-op that logs the intended send and
-    returns False, so callers can still record an ``email_logs`` row as failed.
+    When no Resend API key is configured this is a no-op that logs the intended
+    send and returns False, so callers can still record an ``email_logs`` row as
+    failed. Any delivery error is caught and returns False — sending an email is
+    never allowed to crash the pipeline.
     """
     if not to:
         logger.warning("send_email called with no recipient")
@@ -57,26 +66,25 @@ def send_email(to: str, subject: str, html: str) -> bool:
         logger.info("[email dormant] would send to %s: %s", to, subject)
         return False
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = _from_address()
-    msg["To"] = to
-    msg.attach(MIMEText(_strip_html(html), "plain"))
-    msg.attach(MIMEText(html, "html"))
-
-    host = os.environ["SMTP_HOST"]
-    port = int(os.environ.get("SMTP_PORT", "587"))
-    user = os.environ["SMTP_USER"]
-    password = os.environ["SMTP_PASSWORD"]
+    # Set the key per-call from the environment; it is never stored elsewhere
+    # or written to logs.
+    resend.api_key = os.environ["RESEND_API_KEY"]
+    params: resend.Emails.SendParams = {
+        "from": _from_address(),
+        "to": [to],
+        "subject": subject,
+        "html": html,
+        "text": _strip_html(html),
+    }
     try:
-        with smtplib.SMTP(host, port, timeout=20) as server:
-            server.starttls()
-            server.login(user, password)
-            server.sendmail(_from_address(), [to], msg.as_string())
-        logger.info("sent '%s' email to %s", subject, to)
-        return True
+        result = resend.Emails.send(params)
+        email_id = (
+            result.get("id") if isinstance(result, dict) else getattr(result, "id", None)
+        )
+        logger.info("sent '%s' email to %s (resend id=%s)", subject, to, email_id)
+        return bool(email_id)
     except Exception:  # noqa: BLE001 — a send failure is recorded, never fatal
-        logger.exception("failed to send email to %s", to)
+        logger.exception("failed to send email to %s via Resend", to)
         return False
 
 
