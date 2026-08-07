@@ -32,6 +32,14 @@ function SettingsInner() {
     });
   }, []);
 
+  // The calendar OAuth callback redirects back here with ?calendar=error when the
+  // Google connection failed (invalid state, code exchange rejected, etc.).
+  useEffect(() => {
+    if (params.get("calendar") === "error") {
+      setCalError("Couldn't connect Google Calendar. Please try connecting again.");
+    }
+  }, [params]);
+
   async function save() {
     setSaving(true);
     setSaved(false);

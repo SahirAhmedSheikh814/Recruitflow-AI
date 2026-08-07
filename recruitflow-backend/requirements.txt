@@ -26,3 +26,4 @@ google-auth-oauthlib==1.2.1
 google-api-python-client==2.149.0
 cryptography==43.0.1
 resend==2.35.0
+tzdata==2024.2  # IANA tz database for zoneinfo (APP_TIMEZONE) on slim/Windows images

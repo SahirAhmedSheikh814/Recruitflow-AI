@@ -31,7 +31,24 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
+      # Candidate-login OAuth callback (proxied through the website's Vercel domain).
       - key: GOOGLE_REDIRECT_URI
+        sync: false
+      # Calendar-connect OAuth callback — MUST be this backend's own URL, e.g.
+      # https://recruitflow-ai-3u84.onrender.com/interviews/calendar/callback
+      # (distinct from GOOGLE_REDIRECT_URI, which is proxied through Vercel).
+      - key: GOOGLE_CALENDAR_REDIRECT_URI
+        sync: false
+      # This service's public base URL; used as the calendar redirect fallback.
+      - key: BACKEND_URL
+        sync: false
+      # Recruiter dashboard origin the calendar callback redirects back to, e.g.
+      # https://recruitflow-ai-recruiter-dashboard.vercel.app
+      - key: RECRUITER_DASHBOARD_URL
+        sync: false
+      # Business timezone (IANA name) recruiter wall-clock times are anchored in,
+      # e.g. Australia/Sydney. Defaults to UTC if unset.
+      - key: APP_TIMEZONE
         sync: false
       - key: TOKEN_ENCRYPTION_KEY
         sync: false
@@ -56,4 +73,9 @@ services:
       - key: IMAP_USER
         sync: false
       - key: IMAP_PASSWORD
+        sync: false
+      # Email sending is via the Resend HTTPS API (Render blocks outbound SMTP).
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
         sync: false

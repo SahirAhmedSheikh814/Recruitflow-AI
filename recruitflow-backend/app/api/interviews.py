@@ -6,6 +6,8 @@
   * Inbound reply intake (Module 11): posts a candidate's email reply into the
     Reply Intent Agent pipeline. The IMAP worker calls the same code path.
 """
+import logging
+import os
 import secrets
 import uuid
 
@@ -26,8 +28,23 @@ from app.services import calendar_service
 
 router = APIRouter()
 
+logger = logging.getLogger("recruitflow.interviews")
+
 # In-memory CSRF state store for the calendar OAuth round-trip (single worker).
 _oauth_states: dict[str, str] = {}
+
+
+def _recruiter_settings_url(status: str) -> str:
+    """Absolute URL the browser is sent to after the calendar OAuth round-trip.
+
+    The callback is hit by Google in the recruiter's browser, so we must redirect
+    to the recruiter DASHBOARD origin — not a backend-relative path (which 404s on
+    the API host) and not the public career site. The origin is configured via
+    ``RECRUITER_DASHBOARD_URL`` so nothing is hardcoded; it falls back to localhost
+    for dev. ``status`` is ``connected`` or ``error``.
+    """
+    base = (os.environ.get("RECRUITER_DASHBOARD_URL") or "http://localhost:3000").rstrip("/")
+    return f"{base}/recruiter/settings?calendar={status}"
 
 
 def _interview_out(iv: Interview) -> dict:
@@ -183,14 +200,22 @@ async def calendar_callback(
     state: str,
     session: Session = Depends(get_session),
 ):
-    """OAuth callback: exchange the code, store the encrypted refresh token."""
+    """OAuth callback: exchange the code, store the encrypted refresh token.
+
+    This endpoint is loaded in the recruiter's browser by Google, so it always
+    ends in a redirect back to the recruiter dashboard (never a raw JSON error) —
+    ``?calendar=connected`` on success, ``?calendar=error`` on any failure.
+    """
     recruiter_id = _oauth_states.pop(state, None)
     if not recruiter_id:
-        raise HTTPException(400, "Invalid or expired state")
+        logger.warning("calendar callback with invalid/expired state")
+        return RedirectResponse(url=_recruiter_settings_url("error"))
     try:
         refresh_token = await calendar_service.exchange_code_for_refresh_token(code)
     except calendar_service.CalendarError as exc:
-        raise HTTPException(400, str(exc))
+        # Never log the code/token — only the failure reason.
+        logger.warning("calendar code exchange failed: %s", exc)
+        return RedirectResponse(url=_recruiter_settings_url("error"))
 
     profile = session.exec(
         select(RecruiterProfile).where(RecruiterProfile.user_id == uuid.UUID(recruiter_id))
@@ -201,7 +226,7 @@ async def calendar_callback(
     profile.google_calendar_connected = True
     session.add(profile)
     session.commit()
-    return RedirectResponse(url="/recruiter/settings?calendar=connected")
+    return RedirectResponse(url=_recruiter_settings_url("connected"))
 
 
 # ── Inbound reply (Module 11) ─────────────────────────────────────────────
