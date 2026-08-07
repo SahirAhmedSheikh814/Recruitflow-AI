@@ -4,6 +4,16 @@
 
 ---
 
+## Live Deployment
+
+| Resource | URL |
+|---|---|
+| **Recruiter Dashboard** (Vercel) | <https://recruitflow-ai-recruiter-dashboard.vercel.app/> |
+| **Backend API** (Render) | <https://recruitflow-ai-3u84.onrender.com> |
+| **API Docs** (Swagger UI) | <https://recruitflow-ai-3u84.onrender.com/docs> |
+
+---
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -240,10 +250,11 @@ The dashboard runs at `http://localhost:3000` (or the next free port). Ensure th
 
 ## Deployment
 
-Deployed to **Vercel** as its own project from the `recruitflow-recruiter` repo.
+Deployed to **Vercel** as its own project from the `recruitflow-recruiter` repo — live at
+<https://recruitflow-ai-recruiter-dashboard.vercel.app/>.
 
 1. Import the repo into Vercel
-2. Set `NEXT_PUBLIC_API_URL` (Render backend URL) and `NEXT_PUBLIC_PORTAL=recruiter` in Environment Variables
+2. Set `NEXT_PUBLIC_API_URL` (`https://recruitflow-ai-3u84.onrender.com`) and `NEXT_PUBLIC_PORTAL=recruiter` in Environment Variables
 3. Deploy — Vercel builds the Next.js 16 app and serves it on the assigned domain
 
 > **Backend cold starts:** the backend runs on Render's free plan, which sleeps

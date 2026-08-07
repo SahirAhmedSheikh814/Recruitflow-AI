@@ -4,6 +4,16 @@
 
 ---
 
+## Live Deployment
+
+| Resource | URL |
+|---|---|
+| **Career Website & Candidate Portal** (Vercel) | <https://recruitflow-ai-eta.vercel.app/> |
+| **Backend API** (Render) | <https://recruitflow-ai-3u84.onrender.com> |
+| **API Docs** (Swagger UI) | <https://recruitflow-ai-3u84.onrender.com/docs> |
+
+---
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -260,10 +270,11 @@ Runs at `http://localhost:3000`. Ensure the backend is up on port 7860.
 
 ## Deployment
 
-Deployed to **Vercel** from the `recruitflow-website` repo.
+Deployed to **Vercel** from the `recruitflow-website` repo — live at
+<https://recruitflow-ai-eta.vercel.app/>.
 
 1. Import the repo into Vercel
-2. Set `NEXT_PUBLIC_API_URL` (Render backend URL), `NEXT_PUBLIC_PORTAL=candidate`, and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in Environment Variables
+2. Set `NEXT_PUBLIC_API_URL` (`https://recruitflow-ai-3u84.onrender.com`), `NEXT_PUBLIC_PORTAL=candidate`, and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in Environment Variables
 3. Deploy — Vercel builds the Next.js 16 app and serves both the public site and the candidate portal
 
 > **Backend cold starts:** the backend runs on Render's free plan, which sleeps

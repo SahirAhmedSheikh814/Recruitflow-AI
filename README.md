@@ -20,13 +20,14 @@
 
 | Surface | Description | URL |
 |---|---|---|
-| **Career Website & Candidate Portal** | Public job site + candidate dashboard | `_TBD_` |
-| **Recruiter Dashboard** | Pipeline, scoring, interview control | `_TBD_` |
-| **Admin Dashboard** | Global oversight, recruiter & job management | `_TBD_` |
-| **Backend API** | FastAPI REST + WebSocket (Render) | `_TBD_` |
-| **API Docs (Swagger)** | Interactive OpenAPI reference | `_TBD_/docs` |
+| **Career Website & Candidate Portal** | Public job site + candidate dashboard | <https://recruitflow-ai-eta.vercel.app/> |
+| **Recruiter Dashboard** | Pipeline, scoring, interview control | <https://recruitflow-ai-recruiter-dashboard.vercel.app/> |
+| **Admin Dashboard** | Global oversight, recruiter & job management | <https://recruitflow-ai-admin-dashboard.vercel.app/> |
+| **Backend API** | FastAPI REST + WebSocket (Render) | <https://recruitflow-ai-3u84.onrender.com> |
+| **API Docs (Swagger)** | Interactive OpenAPI reference | <https://recruitflow-ai-3u84.onrender.com/docs> |
 
-> Deployment URLs will be filled in once the Vercel projects and Render service go live.
+> The three frontends are hosted on Vercel; the backend API runs on Render. The
+> API is self-documenting — open the Swagger UI above to explore every endpoint live.
 
 ---
 

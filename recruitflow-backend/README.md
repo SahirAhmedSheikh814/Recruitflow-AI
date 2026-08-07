@@ -4,6 +4,21 @@
 
 ---
 
+## Live Deployment
+
+| Resource | URL |
+|---|---|
+| **Backend API** (Render) | <https://recruitflow-ai-3u84.onrender.com> |
+| **Interactive API Docs** (Swagger UI) | <https://recruitflow-ai-3u84.onrender.com/docs> |
+| **Health check** | <https://recruitflow-ai-3u84.onrender.com/health> |
+
+> The three frontends this API serves: Career Website & Candidate Portal
+> (<https://recruitflow-ai-eta.vercel.app/>), Recruiter Dashboard
+> (<https://recruitflow-ai-recruiter-dashboard.vercel.app/>), and Admin Dashboard
+> (<https://recruitflow-ai-admin-dashboard.vercel.app/>).
+
+---
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -461,10 +476,16 @@ Secrets are supplied via environment variables (Render service environment varia
 | `OPENROUTER_API_KEY` | LLM access for all six agents |
 | `JWT_SECRET` | Signing secret for access/refresh tokens |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Candidate login + recruiter calendar OAuth |
-| `GOOGLE_REDIRECT_URI` | OAuth callback URL (your Render service URL + `/auth/google/callback`) |
+| `GOOGLE_REDIRECT_URI` | Candidate-login OAuth callback (e.g. `https://recruitflow-ai-3u84.onrender.com/auth/google/callback`) |
+| `GOOGLE_CALENDAR_REDIRECT_URI` | Recruiter calendar-connect OAuth callback (e.g. `https://recruitflow-ai-3u84.onrender.com/interviews/calendar/callback`) |
+| `BACKEND_URL` | This service's public base URL (e.g. `https://recruitflow-ai-3u84.onrender.com`) — used as the calendar redirect fallback |
+| `RECRUITER_DASHBOARD_URL` | Recruiter dashboard origin the calendar callback returns to (e.g. `https://recruitflow-ai-recruiter-dashboard.vercel.app`) |
+| `APP_TIMEZONE` | Business timezone (IANA name, e.g. `Australia/Sydney`) recruiter working hours are anchored in; defaults to UTC |
 | `TOKEN_ENCRYPTION_KEY` | Encrypts stored Google refresh tokens |
 | `S3_*` / `R2_*` / `STORAGE_*` | Object storage credentials (endpoint, bucket, keys) |
-| `SMTP_*` / `GMAIL_*` | Email sending credentials |
+| `RESEND_API_KEY` | Resend HTTPS email API key (Render blocks outbound SMTP) |
+| `EMAIL_FROM` | Verified sender address for outbound email |
+| `SMTP_*` / `GMAIL_*` | Legacy email sending credentials (SMTP fallback) |
 | `IMAP_*` | Email intake mailbox credentials |
 | `REDIS_URL` | Celery broker/backend (only if running Celery separately) |
 | `FRONTEND_ORIGINS` | Comma-separated production frontend origins for CORS (the three Vercel domains) |
@@ -528,11 +549,17 @@ CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}
    (Or **New → Web Service**, choose the repo, and select the **Docker** runtime.)
 3. Add every environment variable from the table above under the service's
    **Environment** tab (they're declared `sync: false` in `render.yaml`, so Render
-   prompts for each). Set `FRONTEND_ORIGINS` to your three Vercel domains and
-   `GOOGLE_REDIRECT_URI` to `https://<your-service>.onrender.com/auth/google/callback`.
+   prompts for each). Set `FRONTEND_ORIGINS` to your three Vercel domains
+   (`https://recruitflow-ai-eta.vercel.app`,
+   `https://recruitflow-ai-recruiter-dashboard.vercel.app`,
+   `https://recruitflow-ai-admin-dashboard.vercel.app`) and
+   `GOOGLE_REDIRECT_URI` to `https://recruitflow-ai-3u84.onrender.com/auth/google/callback`.
 4. Deploy — Render builds the Dockerfile and starts Uvicorn on `$PORT`. On first
    boot the lifespan handler creates tables and starts the intake scheduler.
-5. Point the three frontends' `NEXT_PUBLIC_API_URL` at the Render service URL.
+5. Point the three frontends' `NEXT_PUBLIC_API_URL` at the Render service URL
+   (`https://recruitflow-ai-3u84.onrender.com`). The live API and its interactive
+   docs are then available at <https://recruitflow-ai-3u84.onrender.com> and
+   <https://recruitflow-ai-3u84.onrender.com/docs>.
 
 ### Free-plan cold starts
 
