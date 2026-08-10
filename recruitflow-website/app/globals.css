@@ -29,3 +29,38 @@ body {
   color: var(--foreground);
   font-family: var(--font-inter), Arial, Helvetica, sans-serif;
 }
+
+/* ------------------------------------------------------------------ */
+/* Scrollbar — brand-themed: primary-color thumb on a white track.    */
+/* Cosmetic only; does not affect layout, logic, or functionality.    */
+/* ------------------------------------------------------------------ */
+
+/* Firefox */
+* {
+  scrollbar-width: auto;
+  scrollbar-color: #4a6cf7 #ffffff;
+}
+
+/* WebKit (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+
+::-webkit-scrollbar-track {
+  background: #ffffff;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #4a6cf7;
+  border-radius: 9999px;
+  border: 2px solid #ffffff;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #2e48c4;
+}
+
+::-webkit-scrollbar-corner {
+  background: #ffffff;
+}
