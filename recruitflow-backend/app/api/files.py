@@ -1,16 +1,19 @@
-"""File serving for locally-stored resumes.
+"""Authenticated file serving for candidate résumés.
 
-When object storage (R2/S3) is configured, resume files are served directly from
-the bucket's public/CDN URL and this route is unused. Before those credentials
-exist, resumes live on local disk and recruiters download them through here.
+Résumés are served through this route whether they live in the private R2
+bucket or on local disk — the storage service reads the bytes from whichever
+backend is configured, and we stream them back. Because the R2 bucket is
+private, this authenticated route is the only way to read a résumé; files are
+never exposed via a public bucket URL.
 
-Access is restricted to recruiters/admins — candidate resumes are not public.
+Access is restricted to recruiters/admins — candidate résumés are not public.
 """
+import io
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from app.core.security import decode_token
@@ -52,17 +55,15 @@ def require_file_viewer(
 def get_avatar(name: str):
     """Serve a profile-picture image. Avatars carry unguessable UUID names and
     are low-sensitivity, so this route is unauthenticated — an ``<img>`` tag in
-    any of the three portals can load it without sending a portal cookie."""
-    if storage_service.is_object_storage_configured():
-        # Files are served from the bucket, not here.
-        raise HTTPException(404, "Not found")
+    any of the three portals can load it without sending a portal cookie. The
+    bytes come from R2 or local disk, whichever the storage service uses."""
     key = f"avatars/{name}"
     try:
         data = storage_service.read_file(key)
     except storage_service.StorageError:
         raise HTTPException(404, "File not found")
-    return Response(
-        content=data,
+    return StreamingResponse(
+        io.BytesIO(data),
         media_type=storage_service.content_type_for(key),
         headers={"Content-Disposition": f'inline; filename="{name}"'},
     )
@@ -73,15 +74,15 @@ def get_file(
     key: str,
     _=Depends(require_file_viewer),
 ):
-    if storage_service.is_object_storage_configured():
-        # Files are served from the bucket, not here.
-        raise HTTPException(404, "Not found")
+    # Auth is enforced by require_file_viewer above. The résumé bytes are read
+    # from the private R2 bucket (or local disk in dev) and streamed back, so a
+    # private bucket is served securely without ever exposing a public URL.
     try:
         data = storage_service.read_resume(key)
     except storage_service.StorageError:
         raise HTTPException(404, "File not found")
-    return Response(
-        content=data,
+    return StreamingResponse(
+        io.BytesIO(data),
         media_type=storage_service.content_type_for(key),
         headers={"Content-Disposition": f'inline; filename="{key.split("/")[-1]}"'},
     )

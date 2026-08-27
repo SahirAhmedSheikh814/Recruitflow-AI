@@ -13,14 +13,17 @@ Whether a key lives in R2/S3 or on local disk is an implementation detail — th
 key format is identical, so switching backends never requires a data migration
 of the stored references.
 
-Configure S3/R2 by setting all of:
-  STORAGE_ACCESS_KEY_ID, STORAGE_SECRET_ACCESS_KEY, STORAGE_BUCKET
-  STORAGE_ENDPOINT_URL   (R2/S3-compatible endpoint; omit for real AWS S3)
-  STORAGE_REGION         (default "auto" — correct for Cloudflare R2)
-  STORAGE_PUBLIC_BASE_URL (optional; public CDN/base URL for served files)
+Configure Cloudflare R2 by setting all of:
+  R2_ACCOUNT_ID          (used to build the S3 API endpoint,
+                          https://<account-id>.r2.cloudflarestorage.com)
+  R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME
+
+The bucket is private: files are always served back through the authenticated
+backend ``GET /files/{key}`` route, never a public bucket URL.
 
 If those are absent, files are written under LOCAL_STORAGE_DIR (default
-``./storage``) and served via the backend ``GET /files/{key}`` route.
+``./storage``) and served via the same ``GET /files/{key}`` route — so local
+development works with no R2 credentials.
 """
 import os
 import uuid
@@ -79,9 +82,10 @@ def content_type_for(key: str) -> str:
 
 def _use_s3() -> bool:
     return bool(
-        os.environ.get("STORAGE_ACCESS_KEY_ID")
-        and os.environ.get("STORAGE_SECRET_ACCESS_KEY")
-        and os.environ.get("STORAGE_BUCKET")
+        os.environ.get("R2_ACCOUNT_ID")
+        and os.environ.get("R2_ACCESS_KEY_ID")
+        and os.environ.get("R2_SECRET_ACCESS_KEY")
+        and os.environ.get("R2_BUCKET_NAME")
     )
 
 
@@ -109,10 +113,11 @@ def _s3_client():
 
     return boto3.client(
         "s3",
-        aws_access_key_id=os.environ["STORAGE_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["STORAGE_SECRET_ACCESS_KEY"],
-        endpoint_url=os.environ.get("STORAGE_ENDPOINT_URL") or None,
-        region_name=os.environ.get("STORAGE_REGION", "auto"),
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        # Cloudflare R2's S3 API endpoint is derived from the account id.
+        endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+        region_name="auto",
         config=Config(signature_version="s3v4"),
     )
 
@@ -178,7 +183,7 @@ def store_resume(
     if _use_s3():
         client = _s3_client()
         client.put_object(
-            Bucket=os.environ["STORAGE_BUCKET"],
+            Bucket=os.environ["R2_BUCKET_NAME"],
             Key=key,
             Body=content,
             ContentType=content_type_for(key),
@@ -197,7 +202,7 @@ def read_resume(key: str) -> bytes:
     if _use_s3():
         client = _s3_client()
         try:
-            obj = client.get_object(Bucket=os.environ["STORAGE_BUCKET"], Key=key)
+            obj = client.get_object(Bucket=os.environ["R2_BUCKET_NAME"], Key=key)
             return obj["Body"].read()
         except Exception as exc:  # noqa: BLE001 — surface a clean domain error
             raise StorageError(f"Could not read {key}: {exc}") from exc
@@ -209,15 +214,14 @@ def read_resume(key: str) -> bytes:
 
 
 def public_url(key: Optional[str]) -> Optional[str]:
-    """Best-effort URL a recruiter's browser can open. For S3/R2 this is the
-    configured public base; for local files it's the backend file route."""
+    """URL a recruiter's browser can open for a stored file.
+
+    The R2 bucket is private, so both R2 and local-disk keys are served back
+    through the authenticated backend ``GET /files/{key}`` route rather than a
+    public bucket URL. The frontend fetches this path through its same-origin
+    proxy so the auth cookie rides along."""
     if not key:
         return None
-    if _use_s3():
-        base = os.environ.get("STORAGE_PUBLIC_BASE_URL")
-        if base:
-            return f"{base.rstrip('/')}/{key}"
-        return None  # bucket is private and no public base configured
     backend = os.environ.get("BACKEND_URL", "http://localhost:7860")
     return f"{backend.rstrip('/')}/files/{key}"
 
@@ -301,7 +305,7 @@ def store_avatar(
     if _use_s3():
         client = _s3_client()
         client.put_object(
-            Bucket=os.environ["STORAGE_BUCKET"],
+            Bucket=os.environ["R2_BUCKET_NAME"],
             Key=key,
             Body=content,
             ContentType=content_type_for(key),
@@ -319,7 +323,7 @@ def read_file(key: str) -> bytes:
     if _use_s3():
         client = _s3_client()
         try:
-            obj = client.get_object(Bucket=os.environ["STORAGE_BUCKET"], Key=key)
+            obj = client.get_object(Bucket=os.environ["R2_BUCKET_NAME"], Key=key)
             return obj["Body"].read()
         except Exception as exc:  # noqa: BLE001 — surface a clean domain error
             raise StorageError(f"Could not read {key}: {exc}") from exc
