@@ -8,7 +8,9 @@ import { SlotPicker } from "@/components/dashboard/SlotPicker";
 import { StatusBadge, ClassificationBadge } from "@/components/ui/StatusBadge";
 import {
   ApiError,
+  openProtectedResume,
   rejectBulk,
+  resumeErrorMessage,
   sendInterviewInvitation,
   shortlistApplication,
   type PipelineRow,
@@ -117,6 +119,25 @@ export function CandidateDetailModal({
     }
   }
 
+  // Résumés are behind the backend's cookie-protected /files route, so fetch the
+  // file through the authenticated API client and open the resulting blob rather
+  // than navigating straight to the cross-origin backend URL (which sends no
+  // auth cookie → 401).
+  async function handleViewResume() {
+    const url = row!.candidate?.resume_download_url;
+    if (!url) return;
+    setBusy("resume");
+    setError(null);
+    setSuccess(null);
+    try {
+      await openProtectedResume(url);
+    } catch (err) {
+      setError(resumeErrorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <Modal open={open} onClose={onClose} title={row.candidate?.full_name ?? "Candidate"} wide>
       <div className="flex flex-wrap items-center gap-3">
@@ -163,14 +184,14 @@ export function CandidateDetailModal({
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         {row.candidate?.resume_download_url && (
-          <a
-            href={row.candidate.resume_download_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-10 items-center rounded-lg border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          <Button
+            variant="secondary"
+            className="h-10"
+            loading={busy === "resume"}
+            onClick={handleViewResume}
           >
             View résumé
-          </a>
+          </Button>
         )}
         {!readOnly && (
           <>

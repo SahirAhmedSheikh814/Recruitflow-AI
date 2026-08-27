@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import {
   getAllCandidates,
+  openProtectedResume,
+  resumeErrorMessage,
   updateCandidate,
   deleteCandidate,
   type CandidateRow,
@@ -37,6 +39,9 @@ export default function AdminCandidatesPage() {
   const [pendingDelete, setPendingDelete] = useState<CandidateRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Id of the candidate whose résumé is currently being fetched, so we can show a
+  // per-row loading state and block duplicate clicks while it opens.
+  const [openingResume, setOpeningResume] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -103,6 +108,22 @@ export default function AdminCandidatesPage() {
     }
   }
 
+  // Résumés are behind the backend's cookie-protected /files route. Fetch the
+  // file through the authenticated API client and open the resulting blob rather
+  // than navigating straight to the cross-origin backend URL (no auth cookie → 401).
+  async function viewResume(c: CandidateRow) {
+    if (!c.resume_download_url) return;
+    setOpeningResume(c.id);
+    setError(null);
+    try {
+      await openProtectedResume(c.resume_download_url);
+    } catch (e) {
+      setError(resumeErrorMessage(e));
+    } finally {
+      setOpeningResume(null);
+    }
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -117,6 +138,15 @@ export default function AdminCandidatesPage() {
           className="h-10 w-64 rounded-lg border border-zinc-300 px-3 text-sm"
         />
       </div>
+
+      {/* Page-level errors (e.g. a résumé that failed to open). The edit/delete
+          modals show their own copy of `error`; without this banner a résumé
+          failure would set `error` but have nowhere on the table view to appear. */}
+      {error && (
+        <div className="mb-4 rounded-lg border border-rejected/30 bg-rejected/10 px-4 py-3 text-sm text-rejected">
+          {error}
+        </div>
+      )}
 
       {loading ? (
         <div className="py-16 text-center text-zinc-400">Loading…</div>
@@ -144,14 +174,14 @@ export default function AdminCandidatesPage() {
                   </td>
                   <td className="px-4 py-3">
                     {c.resume_download_url ? (
-                      <a
-                        href={c.resume_download_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-medium text-primary hover:underline"
+                      <button
+                        type="button"
+                        onClick={() => viewResume(c)}
+                        disabled={openingResume === c.id}
+                        className="text-sm font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        View
-                      </a>
+                        {openingResume === c.id ? "Opening…" : "View"}
+                      </button>
                     ) : (
                       <span className="text-zinc-300">—</span>
                     )}

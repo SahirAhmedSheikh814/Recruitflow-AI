@@ -162,6 +162,106 @@ export async function apiFetch<T = unknown>(
   return (await res.json()) as T;
 }
 
+// ── Protected files (résumés) ──────────────────────────────────────────────
+
+/**
+ * Fetch a cookie-protected backend file, mirroring apiFetch's silent refresh.
+ *
+ * Goes through the same `/backend` same-origin proxy as every other call, so the
+ * httpOnly auth cookie is sent automatically (`credentials: "include"`) and the
+ * backend's `require_file_viewer` dependency authorises it. Retries once through
+ * /auth/refresh on a 401 — exactly like apiFetch — then replays.
+ */
+async function fetchProtectedFile(url: string, retried = false): Promise<Response> {
+  const res = await wakeFetch(url, {
+    credentials: "include",
+    headers: portalHeaders(),
+  });
+  if (res.status === 401 && !retried) {
+    const refreshed = await wakeFetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: portalHeaders(),
+    });
+    if (refreshed.ok) return fetchProtectedFile(url, true);
+  }
+  return res;
+}
+
+/**
+ * Open a candidate résumé in a new tab, authenticated.
+ *
+ * Résumés are served by the backend's cookie-protected `GET /files/{key}` route.
+ * A plain `<a href>` to `resume_download_url` navigates the browser straight to
+ * the backend's own origin (onrender.com), where our auth cookie — first-party to
+ * THIS Vercel domain — is not sent, so the backend answers 401 "Not authenticated".
+ * Instead we fetch the file through the same `/backend` proxy the rest of the
+ * client uses (the cookie rides along) and hand the browser a `blob:` URL to view.
+ *
+ * `downloadUrl` is the absolute `resume_download_url` from the API. When object
+ * storage is configured it may instead be a public CDN URL (no `/files/` path)
+ * that needs no auth — those are opened directly. Throws ApiError on 401/403/404
+ * so the caller can show a friendly message (see resumeErrorMessage).
+ */
+export async function openProtectedResume(downloadUrl: string): Promise<void> {
+  let path: string | null = null;
+  try {
+    path = new URL(downloadUrl, window.location.origin).pathname;
+  } catch {
+    /* not a parseable URL — treated as opaque below */
+  }
+
+  // Only our own `/files/` route is cookie-protected. A public object-storage/CDN
+  // URL needs no auth, so open it directly — preserving the noopener/noreferrer
+  // isolation the original `<a rel>` had (the storage host gets no back-reference
+  // to this tab and no Referer). This branch has no `await` before the open, so
+  // it stays inside the click gesture and is not popup-blocked.
+  if (!path || !path.startsWith("/files/")) {
+    window.open(downloadUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  // Protected file: open the tab synchronously, inside the click gesture, so it
+  // is not popup-blocked while the (possibly cold-starting, ~40-60s) fetch runs.
+  const tab = window.open("", "_blank");
+  try {
+    const res = await fetchProtectedFile(`${API_URL}${path}`);
+    if (!res.ok) {
+      if (tab) tab.close();
+      throw new ApiError(res.status, await parseError(res));
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    if (tab) {
+      tab.location.href = objectUrl;
+    } else {
+      // The synchronous open above was popup-blocked; a post-fetch open is
+      // outside the click gesture and would be blocked too. Surface the failure
+      // instead of silently doing nothing.
+      URL.revokeObjectURL(objectUrl);
+      throw new ApiError(0, "Could not open a new tab. Please allow pop-ups.");
+    }
+    // Give the new tab time to load the file before releasing the blob.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch (err) {
+    if (tab) tab.close();
+    throw err;
+  }
+}
+
+/**
+ * A friendly, recruiter-facing message for an openProtectedResume failure — keeps
+ * the raw backend detail (e.g. "Not authenticated") out of the UI.
+ */
+export function resumeErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403)
+      return "Your session has expired. Please sign in again to view résumés.";
+    if (err.status === 404) return "Résumé not found.";
+  }
+  return "Could not open the résumé. Please try again.";
+}
+
 // ── Auth ─────────────────────────────────────────────────────────────────
 
 export interface AuthUser {
