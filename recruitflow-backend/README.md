@@ -40,7 +40,7 @@
 
 ## Overview
 
-The **RecruitFlow Backend** is a production-grade Python API built with FastAPI that powers the entire RecruitFlow AI recruitment automation platform. It exposes REST endpoints for the three frontend portals (candidate, recruiter, admin), orchestrates six specialist AI agents via the OpenAI Agents SDK, manages real-time WebSocket updates, integrates with Google Calendar and Gmail APIs, and coordinates background workers for email intake and scheduled reminders.
+The **RecruitFlow Backend** is a production-grade Python API built with FastAPI that powers the entire RecruitFlow AI recruitment automation platform. It exposes REST endpoints for the three frontend portals (candidate, recruiter, admin), orchestrates six specialist AI agents via the OpenAI Agents SDK, manages real-time WebSocket updates, integrates with Google Calendar, Cloudflare R2 object storage and the Resend email API, and coordinates background workers for email intake and scheduled reminders.
 
 **Key Responsibilities:**
 - Authentication (custom JWT + Google OAuth 2.0)
@@ -48,7 +48,8 @@ The **RecruitFlow Backend** is a production-grade Python API built with FastAPI 
 - AI agent orchestration (resume parsing, scoring, scheduling, email drafting, reply understanding)
 - Real-time pipeline updates via WebSocket (`/ats/ws`)
 - Google Calendar integration (OAuth, free/busy checks, event booking)
-- Transactional email sending (Gmail API / SMTP)
+- Transactional email sending via the **Resend** HTTPS API (automated email pipelines + notifications)
+- Permanent resume & avatar storage in a private **Cloudflare R2** bucket (S3-compatible)
 - Background job queue (Celery + Redis)
 - Neon PostgreSQL persistence (SQLModel ORM, Alembic migrations)
 
@@ -86,8 +87,8 @@ The backend is organized into **five logical layers**:
 ┌─────────────────────────────────────────────────────────────────┐
 │  SERVICES LAYER                                                  │
 │  • calendar_service — Google Calendar API wrapper              │
-│  • email_service — Gmail API / SMTP wrapper                    │
-│  • storage_service — S3/R2 file storage (boto3)                │
+│  • email_service — Resend HTTPS API wrapper                    │
+│  • storage_service — Cloudflare R2 storage (boto3)             │
 │  • intake_service — resume ingestion entry point               │
 │  • resume_extraction — PDF/DOCX text extraction                │
 │  • google_oauth — OAuth token exchange + refresh              │
@@ -128,7 +129,8 @@ The backend is organized into **five logical layers**:
 | **Auth** | python-jose (JWT) + bcrypt | 3.3.0 + 4.2.1 |
 | **Google APIs** | google-api-python-client | 2.149.0 |
 | **Resume Parsing** | PyMuPDF + pdfplumber + python-docx | 1.28.0 + 0.11.4 + 1.1.2 |
-| **Object Storage** | boto3 (S3/R2 compatible) | 1.35.32 |
+| **Object Storage** | Cloudflare R2 via boto3 — private bucket, S3-compatible | 1.35.32 |
+| **Transactional Email** | Resend HTTPS API — automated email pipelines & notifications | 2.35.0 |
 | **ASGI Server** | Uvicorn | 0.34.0 |
 | **Deployment** | Render (Docker web service) | Binds `$PORT` |
 
@@ -177,8 +179,8 @@ recruitflow-backend/
 │   ├── services/                   → Business logic + external integrations
 │   │   ├── __init__.py
 │   │   ├── calendar_service.py     → Google Calendar API (OAuth, free/busy, CRUD events)
-│   │   ├── email_service.py        → Gmail API / SMTP sending + template rendering
-│   │   ├── storage_service.py      → S3/R2 file upload/download (boto3)
+│   │   ├── email_service.py        → Resend HTTPS API sending + template rendering
+│   │   ├── storage_service.py      → Cloudflare R2 upload/download (boto3), local-disk fallback
 │   │   ├── intake_service.py       → resume ingestion entry point
 │   │   ├── resume_extraction.py    → PDF/DOCX text extraction (PyMuPDF, pdfplumber, python-docx)
 │   │   ├── google_oauth.py         → OAuth token exchange + refresh logic
@@ -210,7 +212,7 @@ recruitflow-backend/
 ├── alembic.ini                     → Alembic config
 ├── docs/                           → Agent instructions documentation
 ├── scripts/                        → Utility scripts
-└── storage/                        → Local file storage (dev only)
+└── storage/                        → Local file storage (dev fallback when R2 is unconfigured)
 ```
 
 ---
@@ -311,7 +313,7 @@ Returns: total applications, shortlisted, interview pipeline, hired, recruitment
 | Method | Endpoint | Role | Purpose |
 |---|---|---|---|
 | `GET` | `/files/avatars/{name}` | Public | Serves avatars (unauthenticated so `<img>` tags work) |
-| `GET` | `/files/{key:path}` | Recruiter/Admin | Authenticated resume download |
+| `GET` | `/files/{key:path}` | Recruiter/Admin | Authenticated resume download — bytes are streamed from the private Cloudflare R2 bucket, never a public URL |
 
 > The avatar route is deliberately declared **before** the catch-all so candidate profile images don't 401.
 
@@ -350,11 +352,11 @@ Manages the recruiter's Google Calendar. Finds open slots inside working hours (
 - `cancel_interview()` — cancels the calendar event, records the reason
 
 ### 5. Email Agent (`email_agent.py`)
-Owns every outbound transactional email. Renders one of six branded HTML templates and sends via Gmail API or SMTP (Resend/SendGrid fallback).
+Owns every outbound transactional email. Renders one of six branded HTML templates and sends them through the **Resend** HTTPS API, which drives all automated email pipelines and notifications.
 
 **Tools:**
 - `render_email_template()` — fills a branded template with candidate/job data
-- `send_email()` — sends via the configured provider
+- `send_email()` — sends via the Resend HTTPS API
 - `log_email()` — writes a row to `email_logs`
 
 **Templates:** Application Confirmation · Shortlisting Notification · Interview Invitation · Reminder · Offer Letter Notification · Rejection.
@@ -388,9 +390,9 @@ The `services/` directory holds all business logic and external integrations, ke
 | Service | Responsibility |
 |---|---|
 | **calendar_service.py** | Google Calendar API wrapper — builds OAuth consent URLs, exchanges codes for refresh tokens, encrypts/decrypts tokens, queries free/busy, and creates/updates/cancels events. Exposes `is_configured()` so routers can 503 gracefully when credentials are absent. |
-| **email_service.py** | Renders branded HTML templates and sends via Gmail API or SMTP (Resend/SendGrid fallback). Central place for all outbound mail. |
-| **storage_service.py** | S3/R2-compatible object storage via boto3 — `store_avatar()`, `store_resume()`, `read_file()`, `public_url()`. Handles both resume files and profile avatars. |
-| **intake_service.py** | The single `ingest_resume(file, metadata)` entry point used by every intake channel (website, email, forms, LinkedIn). Stores the file, creates candidate + application records, and hands off to the Orchestrator Agent. |
+| **email_service.py** | Renders branded HTML templates and sends them via the **Resend** HTTPS API — the transport behind every automated email pipeline and notification (Render blocks outbound SMTP, so HTTPS delivery is the reliable path). Central place for all outbound mail. |
+| **storage_service.py** | **Cloudflare R2** object storage via boto3 (S3-compatible, private bucket) — `store_avatar()`, `store_resume()`, `read_file()`, `public_url()`. Gives résumés and avatars permanent, secure storage that survives Render redeploys; falls back to local disk when R2 credentials are absent so local development needs none. |
+| **intake_service.py** | The single `ingest_resume(file, metadata)` entry point used by every intake channel (website, email, forms, LinkedIn). Stores the file in R2, creates candidate + application records, and hands off to the Orchestrator Agent. |
 | **resume_extraction.py** | Extracts raw text from PDF (PyMuPDF/pdfplumber) and DOCX (python-docx) before the Resume Parser Agent runs. |
 | **google_oauth.py** | Shared OAuth token exchange + refresh logic for both candidate login and recruiter calendar. |
 | **events.py** | WebSocket broadcast helper — pushes pipeline updates to all connected `/ats/ws` clients whenever an application changes. |
@@ -462,7 +464,8 @@ alembic current               # show current DB revision
 - **Google OAuth** — candidate login + recruiter calendar; refresh tokens encrypted at rest (`core/crypto.py`)
 - **Role guards** — `require_role(UserRole.recruiter, UserRole.admin)` enforced server-side on every protected endpoint (`core/deps.py`)
 - **Rate limiting** — auth endpoints throttled (`core/rate_limit.py`)
-- **File validation** — PDF/DOCX only, size-limited on every intake channel
+- **File validation** — PDF/DOCX only, size-limited, magic-byte content sniffing on every intake channel
+- **Private R2 bucket** — résumés and avatars are never publicly addressable; résumé bytes are read from Cloudflare R2 and streamed back only through the cookie-authenticated `GET /files/{key}` route, restricted to recruiters and admins (`api/files.py`)
 
 ---
 
@@ -482,10 +485,13 @@ Secrets are supplied via environment variables (Render service environment varia
 | `RECRUITER_DASHBOARD_URL` | Recruiter dashboard origin the calendar callback returns to (e.g. `https://recruitflow-ai-recruiter-dashboard.vercel.app`) |
 | `APP_TIMEZONE` | Business timezone (IANA name, e.g. `Australia/Sydney`) recruiter working hours are anchored in; defaults to UTC |
 | `TOKEN_ENCRYPTION_KEY` | Encrypts stored Google refresh tokens |
-| `S3_*` / `R2_*` / `STORAGE_*` | Object storage credentials (endpoint, bucket, keys) |
-| `RESEND_API_KEY` | Resend HTTPS email API key (Render blocks outbound SMTP) |
-| `EMAIL_FROM` | Verified sender address for outbound email |
-| `SMTP_*` / `GMAIL_*` | Legacy email sending credentials (SMTP fallback) |
+| `R2_ACCOUNT_ID` | Cloudflare account id — the R2 S3 endpoint is derived from it (`https://<id>.r2.cloudflarestorage.com`) |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | Cloudflare R2 API token credentials |
+| `R2_BUCKET_NAME` | Private R2 bucket holding résumés and avatars. When all four `R2_*` vars are set, uploads go to R2; otherwise the service falls back to `LOCAL_STORAGE_DIR` (dev only) |
+| `LOCAL_STORAGE_DIR` | Local-disk fallback directory when R2 is unconfigured (defaults to `./storage`) |
+| `RESEND_API_KEY` | Resend HTTPS email API key — powers every automated email pipeline and notification (Render blocks outbound SMTP, so HTTPS delivery is required) |
+| `EMAIL_FROM` | Verified Resend sender address for outbound email (defaults to `onboarding@resend.dev`) |
+| `SMTP_*` / `GMAIL_*` | Legacy email sending credentials — unused in production (Render blocks SMTP ports) |
 | `IMAP_*` | Email intake mailbox credentials |
 | `REDIS_URL` | Celery broker/backend (only if running Celery separately) |
 | `FRONTEND_ORIGINS` | Comma-separated production frontend origins for CORS (the three Vercel domains) |
@@ -554,6 +560,9 @@ CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}
    `https://recruitflow-ai-recruiter-dashboard.vercel.app`,
    `https://recruitflow-ai-admin-dashboard.vercel.app`) and
    `GOOGLE_REDIRECT_URI` to `https://recruitflow-ai-3u84.onrender.com/auth/google/callback`.
+   Set the four `R2_*` variables too — Render's container filesystem is ephemeral, so
+   without Cloudflare R2 any uploaded résumé is lost on the next redeploy or restart.
+   `RESEND_API_KEY` is likewise required for outbound email, since Render blocks SMTP ports.
 4. Deploy — Render builds the Dockerfile and starts Uvicorn on `$PORT`. On first
    boot the lifespan handler creates tables and starts the intake scheduler.
 5. Point the three frontends' `NEXT_PUBLIC_API_URL` at the Render service URL
@@ -578,7 +587,7 @@ or ping `/health` on a schedule with an external uptime monitor.
 
 <div align="center">
 
-**RecruitFlow AI™ Backend** — FastAPI · OpenAI Agents SDK · Neon PostgreSQL
+**RecruitFlow AI™ Backend** — FastAPI · OpenAI Agents SDK · Neon PostgreSQL · Cloudflare R2 · Resend
 
 *© 2026 Sahir Ahmed Sheikh — BranDive Media Solutions. All rights reserved.*
 

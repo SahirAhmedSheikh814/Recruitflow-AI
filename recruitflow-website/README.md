@@ -52,6 +52,8 @@ The two are separated at the routing level: public pages live under `app/(public
 | **Animation** | Framer Motion |
 | **Icons** | Lucide React |
 | **Auth** | Custom JWT (`candidate_` cookie) + Google OAuth 2.0 |
+| **Resume Storage** | Cloudflare R2 (via the backend) — secure, permanent object storage for every uploaded résumé and avatar |
+| **Email** | Resend (via the backend) — automated email pipelines & notifications, e.g. the Application Confirmation a candidate receives on submit |
 | **Hosting** | Vercel |
 
 > **Note:** This is Next.js 16 — middleware is `proxy.ts` (not `middleware.ts`).

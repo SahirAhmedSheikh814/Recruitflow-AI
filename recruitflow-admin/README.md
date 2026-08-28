@@ -55,6 +55,8 @@ The **Admin Dashboard** is the top-level governance surface for RecruitFlow AI. 
 | **Charts** | Recharts |
 | **Real-time** | Native WebSocket (`/ats/ws`) |
 | **Auth** | JWT via httpOnly cookie (`admin_access_token`) |
+| **Resume Storage** | Cloudflare R2 (via the backend) — résumés live in a private bucket and are streamed to the admin through the authenticated `/files/{key}` route |
+| **Email** | Resend (via the backend) — automated email pipelines & notifications recorded in `email_logs` |
 | **Hosting** | Vercel |
 
 > **Note:** This is Next.js 16 — middleware is defined in `proxy.ts` (not `middleware.ts`), and conventions differ from earlier versions.

@@ -10,6 +10,8 @@
 [![Frontend](https://img.shields.io/badge/Frontend-Next.js%2016%20%2B%20TypeScript-000000?logo=nextdotjs&logoColor=white)](#)
 [![Database](https://img.shields.io/badge/Database-Neon%20PostgreSQL-00E599?logo=postgresql&logoColor=white)](#)
 [![AI](https://img.shields.io/badge/AI-OpenAI%20Agents%20SDK-412991?logo=openai&logoColor=white)](#)
+[![Storage](https://img.shields.io/badge/Storage-Cloudflare%20R2-F38020?logo=cloudflare&logoColor=white)](#)
+[![Email](https://img.shields.io/badge/Email-Resend-000000?logo=resend&logoColor=white)](#)
 [![License](https://img.shields.io/badge/License-Proprietary-red)](#)
 
 </div>
@@ -258,8 +260,8 @@ RecruitFlow AI is built as **five layers**. The diagram below is the complete, a
 ║  forms_worker  → Google Forms responses  ║   ║   ─────────────────────────── ║
 ║  reminder_worker → 24h interview reminder║   ║   users · recruiter_profiles  ║
 ║  ── external APIs ──                     ║   ║   jobs · candidates           ║
-║  Google Calendar · Gmail/SMTP · IMAP     ║   ║   applications · interviews   ║
-║  Cloudflare R2 / S3 (resumes, avatars)   ║   ║   email_logs · agent_runs     ║
+║  Google Calendar · Resend API · IMAP     ║   ║   applications · interviews   ║
+║  Cloudflare R2 (private resumes/avatars) ║   ║   email_logs · agent_runs     ║
 ╚══════════════════════════════════════════╝   ╚═══════════════════════════════╝
                        ▲
                        │
@@ -273,7 +275,7 @@ RecruitFlow AI is built as **five layers**. The diagram below is the complete, a
 ### How It Works (End-to-End)
 
 1. **Candidate applies** via website, email, LinkedIn, or Google Form → resume lands in **Intake Layer**
-2. Intake stores the file (S3/R2), creates `candidate` + `application` records (`status = received`), and the Email Agent fires an **Application Confirmation**
+2. Intake stores the file permanently in **Cloudflare R2**, creates `candidate` + `application` records (`status = received`), and the Email Agent fires an **Application Confirmation** via **Resend**
 3. **Orchestrator Agent** wakes up, hands off to **Resume Parser Agent**
 4. Resume Parser extracts structured data (name, email, skills, experience, education) → saves to `candidates.parsed_data` (`status = parsed`)
 5. Orchestrator hands off to **Scoring Agent**
@@ -463,8 +465,8 @@ The ten Neon PostgreSQL tables and how they relate — the single source of trut
 | **Resume Parsing** | PyMuPDF / pdfplumber (PDF) + python-docx (DOCX) |
 | **Auth** | Custom JWT (access + refresh) + bcrypt/argon2 + Google OAuth 2.0 |
 | **Calendar** | Google Calendar API (OAuth 2.0) |
-| **Email** | Gmail API / SMTP (Resend/SendGrid fallback) for sending; IMAP for reading |
-| **File Storage** | Cloudflare R2 / S3-compatible object storage (boto3) |
+| **Email** | Resend HTTPS API — automated email pipelines & notifications (six branded templates); IMAP for reading replies |
+| **File Storage** | Cloudflare R2 — secure, permanent resume & avatar storage (private bucket, S3-compatible via boto3) |
 | **Frontend Hosting** | Vercel (three projects) |
 | **Backend Hosting** | Render — Docker web service |
 | **Version Control** | Git & GitHub |
@@ -563,9 +565,10 @@ received → parsed → scored → shortlisted ─┬─▶ interview_scheduled 
 - **Portal-scoped cookies** (`candidate_`/`recruiter_`/`admin_` prefixes) keep the three sessions isolated
 - **Google OAuth tokens** (login + Calendar refresh tokens) encrypted at rest
 - **Role checks** enforced server-side on every endpoint via FastAPI dependencies
-- **File upload validation** — PDF/DOCX only, size-limited
+- **File upload validation** — PDF/DOCX only, size-limited, magic-byte content sniffing
+- **Private object storage** — the Cloudflare R2 bucket holding résumés and avatars is private; no file is reachable by a public bucket URL. Résumés are streamed back only through the authenticated `GET /files/{key}` route, restricted to recruiters and admins
 - **Rate limiting** on auth endpoints
-- **All secrets** in Vercel Environment Variables (frontend) and Render service environment variables (backend) — never committed
+- **All secrets** in Vercel Environment Variables (frontend) and Render service environment variables (backend) — never committed. R2 keys and the Resend API key stay server-side only
 - **Full audit trail** — every agent action logged to `agent_runs`
 
 ---

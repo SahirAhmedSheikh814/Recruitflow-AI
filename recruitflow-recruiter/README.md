@@ -57,6 +57,8 @@ The **Recruiter Dashboard** is the Next.js 16 application recruiters use every d
 | **Charts** | Recharts |
 | **Real-time** | Native WebSocket (`/ats/ws`) |
 | **Auth** | JWT via httpOnly cookie (`recruiter_access_token`) |
+| **Resume Storage** | Cloudflare R2 (via the backend) — résumés live in a private bucket and are streamed to the recruiter through the authenticated `/files/{key}` route |
+| **Email** | Resend (via the backend) — automated email pipelines & notifications for rejections, shortlisting and interview invitations |
 | **Hosting** | Vercel |
 
 > **Note:** This is Next.js 16 — APIs and conventions differ from earlier versions. Middleware is defined in `proxy.ts` (not `middleware.ts`).
