@@ -29,8 +29,8 @@ export function RivaHeader({
 
       <div className="relative min-w-0 flex-1">
         <p className="font-poppins text-sm font-semibold leading-tight">Riva</p>
-        <p className="flex items-center gap-1.5 text-xs text-white/80">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-shortlisted" />
+        <p className="flex items-center gap-1.5 text-xs text-white/90">
+        {/*  <span className="inline-block h-1.5 w-1.5 rounded-full bg-shortlisted" /> */}
            AI Career Assistant
         </p>
       </div>

@@ -48,6 +48,10 @@ export function RivaWidget() {
   const [busy, setBusy] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The résumé File is cleared from the composer preview the moment it's sent,
+  // but the bytes must survive until the (possibly later) submission turn — so
+  // we retain the most recent attachment here across turns.
+  const retainedFileRef = useRef<File | null>(null);
   const prefersReduced = useReducedMotion();
 
   // Only candidates ever see Riva. The portal layout is already candidate-only
@@ -107,6 +111,7 @@ export function RivaWidget() {
       });
       setMessages((prev) => [...prev, outcome.assistant_message]);
       setAttachedFile(null);
+      retainedFileRef.current = null;
     } catch (err) {
       const detail =
         err instanceof ApiError ? err.message : "an unexpected error occurred";
@@ -117,27 +122,65 @@ export function RivaWidget() {
 
   async function handleSend(text: string) {
     if (busy) return;
-    setBusy(true);
+    const trimmed = text.trim();
     const fileForTurn = attachedFile;
+    if (!trimmed && !fileForTurn) return;
 
-    // Optimistically show the candidate's message.
-    const optimistic: RivaMessageType = {
-      id: `__local__${Date.now()}`,
-      role: "user",
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...(prev.length ? prev : []), optimistic]);
+    setBusy(true);
+    // Retain the File for the eventual submission turn, then clear the composer
+    // preview immediately so the attachment chip disappears from the input.
+    if (fileForTurn) {
+      retainedFileRef.current = fileForTurn;
+      setAttachedFile(null);
+    }
+
+    const now = Date.now();
+    // A session-only bubble representing the attached résumé (icon + filename).
+    const fileBubble: RivaMessageType | null = fileForTurn
+      ? {
+          id: `__file__${now}`,
+          role: "user",
+          content: "",
+          created_at: new Date().toISOString(),
+          attachment: { name: fileForTurn.name },
+        }
+      : null;
+    // Optimistic bubble for the typed text (omitted for a file-only send).
+    const optimistic: RivaMessageType | null = trimmed
+      ? {
+          id: `__local__${now}`,
+          role: "user",
+          content: trimmed,
+          created_at: new Date().toISOString(),
+        }
+      : null;
+
+    setMessages((prev) => {
+      const base = prev.length ? prev : [];
+      const additions = [fileBubble, optimistic].filter(
+        (m): m is RivaMessageType => m !== null,
+      );
+      return [...base, ...additions];
+    });
+
+    // Ensure Riva always receives a message, even when only a file was sent.
+    const backendContent =
+      trimmed || `I've attached my résumé: ${fileForTurn?.name ?? ""}`.trim();
 
     try {
-      const res = await sendRivaMessage(text, fileForTurn?.name);
-      // Replace the optimistic bubble with the server's canonical pair.
+      const res = await sendRivaMessage(backendContent, fileForTurn?.name);
+      // Swap the optimistic text bubble for the server's canonical pair; keep
+      // the local file bubble (the server doesn't echo attachments). For a
+      // file-only send, don't render the synthesized user message.
       setMessages((prev) => {
-        const withoutOptimistic = prev.filter((m) => m.id !== optimistic.id);
-        return [...withoutOptimistic, res.user_message, res.assistant_message];
+        const withoutOptimistic = optimistic
+          ? prev.filter((m) => m.id !== optimistic.id)
+          : prev;
+        const serverUser = trimmed ? [res.user_message] : [];
+        return [...withoutOptimistic, ...serverUser, res.assistant_message];
       });
       if (res.submission) {
-        await performSubmission(res.submission, fileForTurn);
+        await performSubmission(res.submission, retainedFileRef.current);
       }
     } catch (err) {
       const content =
@@ -166,6 +209,7 @@ export function RivaWidget() {
     }
     setMessages([]);
     setAttachedFile(null);
+    retainedFileRef.current = null;
   }
 
   if (!isCandidate) return null;

@@ -26,6 +26,21 @@ export function RivaComposer({
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Grow the textarea to fit its content, up to the CSS max-height (~4 lines),
+  // after which `overflow-y-auto` takes over with a scrollbar.
+  function autoResize() {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }
+
+  // Collapse the textarea back to its single-line baseline.
+  function resetHeight() {
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
@@ -39,11 +54,13 @@ export function RivaComposer({
     onAttach(file);
   }
 
+  const canSend = Boolean(text.trim() || attachedFile);
+
   function submit() {
-    const trimmed = text.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
+    if (!canSend || disabled) return;
+    onSend(text);
     setText("");
+    resetHeight();
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -102,18 +119,22 @@ export function RivaComposer({
           </svg>
         </button>
         <textarea
+          ref={textareaRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            autoResize();
+          }}
           onKeyDown={handleKeyDown}
           disabled={disabled}
           rows={1}
           placeholder="Message Riva…"
-          className="max-h-28 min-h-[38px] flex-1 resize-none rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+          className="max-h-24 min-h-[38px] flex-1 resize-none overflow-y-auto rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
         />
         <button
           type="button"
           onClick={submit}
-          disabled={disabled || !text.trim()}
+          disabled={disabled || !canSend}
           className="shrink-0 rounded-xl bg-primary p-2.5 text-white transition hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="Send message"
         >

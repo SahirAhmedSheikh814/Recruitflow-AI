@@ -19,6 +19,12 @@ export interface RivaMessage {
   role: RivaRole;
   content: string;
   created_at: string;
+  /**
+   * Client-only marker for a locally-rendered résumé attachment bubble. The
+   * server never sends or persists this — the résumé File lives in browser
+   * memory until submission, so this bubble is session-only.
+   */
+  attachment?: { name: string } | null;
 }
 
 /** Fields the backend hands back when a draft is ready for POST /applications. */
