@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from app.db.session import create_db_and_tables
 import app.models  # noqa: F401 — registers all tables with SQLModel metadata
 from app.agents.llm_config import configure_llm
-from app.api import auth, jobs, applications, interviews, admin, ats, analytics, files, recruiter
+from app.api import auth, jobs, applications, interviews, admin, ats, analytics, files, recruiter, riva
 from app.workers import scheduler
 
 logger = logging.getLogger("recruitflow.main")
@@ -60,6 +60,7 @@ app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(ats.router, prefix="/ats", tags=["ats"])
 app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 app.include_router(files.router, prefix="/files", tags=["files"])
+app.include_router(riva.router, prefix="/riva", tags=["riva"])
 
 @app.get("/health")
 def health():

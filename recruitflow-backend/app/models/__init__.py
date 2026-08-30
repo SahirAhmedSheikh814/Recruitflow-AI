@@ -6,6 +6,7 @@ from app.models.application import Application, ApplicationStatus
 from app.models.interview import Interview, InterviewStatus
 from app.models.email_log import EmailLog, EmailType, EmailStatus
 from app.models.agent_run import AgentRun, AgentRunStatus
+from app.models.chat import ChatConversation, ChatMessage, ChatRole
 
 __all__ = [
     "User", "UserRole",
@@ -16,4 +17,5 @@ __all__ = [
     "Interview", "InterviewStatus",
     "EmailLog", "EmailType", "EmailStatus",
     "AgentRun", "AgentRunStatus",
+    "ChatConversation", "ChatMessage", "ChatRole",
 ]

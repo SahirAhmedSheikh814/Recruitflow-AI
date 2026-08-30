@@ -3,6 +3,7 @@ import uuid
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, Cookie, Header, UploadFile, File, status
 from fastapi.responses import RedirectResponse
@@ -29,6 +30,76 @@ COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
 COOKIE_OPTS = dict(httponly=True, secure=COOKIE_SECURE, samesite="lax")
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+
+# ── Environment-aware frontend origin resolution ──────────────────────────
+#
+# After Google OAuth we must send the browser back to the frontend it started
+# on — the LOCAL portal during local dev, the production Vercel portal in prod.
+# The old code always used the static FRONTEND_URL env var, so a backend whose
+# .env pointed at production would bounce a local sign-in to the live site.
+#
+# Instead we capture the origin the flow began on (from the proxy-forwarded
+# host / Origin / Referer of the /auth/google request), validate it against an
+# allowlist, sign it into the OAuth `state`, and read it back on callback. This
+# changes only the redirect *target* — token generation, cookies, and the CSRF
+# state signature/expiry are all untouched. When no trusted origin is available
+# we fall back to FRONTEND_URL, preserving the previous behaviour exactly.
+
+# Loopback origins are always safe redirect targets (the user's own machine).
+_LOCAL_ORIGINS = {
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+}
+
+
+def _allowed_frontend_origins() -> set[str]:
+    """Origins we are willing to redirect the browser back to after OAuth.
+
+    The configured production URL, common local-dev hosts, plus anything listed
+    in ALLOWED_FRONTEND_ORIGINS (comma-separated) — so new environments need no
+    code change.
+    """
+    origins = {FRONTEND_URL.rstrip("/")}
+    origins.update(_LOCAL_ORIGINS)
+    for extra in os.environ.get("ALLOWED_FRONTEND_ORIGINS", "").split(","):
+        cleaned = extra.strip().rstrip("/")
+        if cleaned:
+            origins.add(cleaned)
+    return origins
+
+
+def _origin_from_request(request: Request) -> Optional[str]:
+    """Best-effort frontend origin for THIS request.
+
+    Prefers the host the Next.js `/backend` rewrite forwards (`X-Forwarded-*`),
+    then a same-origin `Origin`, then the `Referer`'s origin. Returns None when
+    nothing usable is present.
+    """
+    xf_host = request.headers.get("x-forwarded-host")
+    if xf_host:
+        host = xf_host.split(",")[0].strip()
+        proto = request.headers.get("x-forwarded-proto", "https").split(",")[0].strip()
+        if host:
+            return f"{proto}://{host}"
+    origin = request.headers.get("origin")
+    if origin:
+        return origin.rstrip("/")
+    referer = request.headers.get("referer")
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    return None
+
+
+def _resolve_frontend_origin(candidate: Optional[str]) -> str:
+    """Return `candidate` only if it is allowlisted, else the FRONTEND_URL default."""
+    if candidate:
+        cleaned = candidate.rstrip("/")
+        if cleaned in _allowed_frontend_origins():
+            return cleaned
+    return FRONTEND_URL.rstrip("/")
 
 
 class SignupRequest(BaseModel):
@@ -141,44 +212,59 @@ def logout(response: Response):
 
 # ── Google OAuth 2.0 ──────────────────────────────────────────────────────
 
-def _make_state() -> str:
-    """Short-lived signed state token for CSRF protection."""
+def _make_state(origin: Optional[str] = None) -> str:
+    """Short-lived signed state token for CSRF protection.
+
+    Optionally carries the frontend `origin` the flow began on so the callback
+    can return the browser to the right environment. The origin is signed (not
+    just passed in the URL), so it cannot be tampered with.
+    """
     expire = datetime.utcnow() + timedelta(minutes=10)
-    return jwt.encode({"exp": expire, "nonce": secrets.token_hex(8)}, SECRET_KEY, algorithm=ALGORITHM)
+    payload: dict = {"exp": expire, "nonce": secrets.token_hex(8)}
+    if origin:
+        payload["origin"] = origin
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def _verify_state(state: str) -> bool:
+def _decode_state(state: str) -> Optional[dict]:
+    """Return the decoded state payload, or None if invalid/expired."""
     try:
-        jwt.decode(state, SECRET_KEY, algorithms=[ALGORITHM])
-        return True
+        return jwt.decode(state, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
-        return False
+        return None
 
 
 @router.get("/google", dependencies=[Depends(check_auth_rate_limit)])
-def google_login():
+def google_login(request: Request):
     """Redirect the browser to Google's consent screen."""
     if not google_oauth.is_configured():
         raise HTTPException(503, "Google OAuth is not configured")
-    state = _make_state()
+    # Remember (allowlisted) where the flow started so the callback returns here.
+    origin = _resolve_frontend_origin(_origin_from_request(request))
+    state = _make_state(origin)
     url = google_oauth.build_authorization_url(state)
     return RedirectResponse(url)
 
 
 @router.get("/google/callback")
 async def google_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
     session: Session = Depends(get_session),
 ):
     """Google redirects here after the user grants (or denies) consent."""
-    frontend_url = FRONTEND_URL
+    payload = _decode_state(state) if state else None
+    # Prefer the origin captured (and allowlisted) at flow start; fall back to
+    # this request's own headers, then the FRONTEND_URL default.
+    state_origin = payload.get("origin") if isinstance(payload, dict) else None
+    frontend_url = _resolve_frontend_origin(state_origin or _origin_from_request(request))
 
     if error or not code or not state:
         return RedirectResponse(f"{frontend_url}/login?error=google_denied")
 
-    if not _verify_state(state):
+    if payload is None:
         return RedirectResponse(f"{frontend_url}/login?error=invalid_state")
 
     try:

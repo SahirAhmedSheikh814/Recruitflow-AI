@@ -1,5 +1,6 @@
 import { DashboardShell } from "@/components/dashboard/DashboardShell";
 import { DashboardIcon, ProfileIcon, PipelineIcon, InterviewsIcon, JobsIcon, NotificationsIcon, SettingsIcon } from "@/components/dashboard/NavIcons";
+import { RivaWidget } from "@/components/riva/RivaWidget";
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,6 +17,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
       ]}
     >
       {children}
+      <RivaWidget />
     </DashboardShell>
   );
 }
