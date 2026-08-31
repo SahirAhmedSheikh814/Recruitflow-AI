@@ -27,14 +27,15 @@
 4. [Project Structure](#project-structure)
 5. [API Routers](#api-routers)
 6. [The Six AI Agents](#the-six-ai-agents)
-7. [Services Layer](#services-layer)
-8. [Background Workers](#background-workers)
-9. [Data Models](#data-models)
-10. [Database Migrations](#database-migrations)
-11. [Authentication & Security](#authentication--security)
-12. [Configuration & Environment](#configuration--environment)
-13. [Local Development Setup](#local-development-setup)
-14. [Deployment (Render)](#deployment-render)
+7. [Riva — The Candidate Assistant Agent](#riva--the-candidate-assistant-agent)
+8. [Services Layer](#services-layer)
+9. [Background Workers](#background-workers)
+10. [Data Models](#data-models)
+11. [Database Migrations](#database-migrations)
+12. [Authentication & Security](#authentication--security)
+13. [Configuration & Environment](#configuration--environment)
+14. [Local Development Setup](#local-development-setup)
+15. [Deployment (Render)](#deployment-render)
 
 ---
 
@@ -46,6 +47,7 @@ The **RecruitFlow Backend** is a production-grade Python API built with FastAPI 
 - Authentication (custom JWT + Google OAuth 2.0)
 - Multi-channel resume intake (website upload, IMAP email polling, Google Forms API)
 - AI agent orchestration (resume parsing, scoring, scheduling, email drafting, reply understanding)
+- **Riva**, the candidate-facing conversational assistant (7th agent) serving the Candidate Dashboard chat
 - Real-time pipeline updates via WebSocket (`/ats/ws`)
 - Google Calendar integration (OAuth, free/busy checks, event booking)
 - Transactional email sending via the **Resend** HTTPS API (automated email pipelines + notifications)
@@ -71,6 +73,7 @@ The backend is organized into **five logical layers**:
 │  • /ats — pipeline (GET + WebSocket), real-time board          │
 │  • /analytics — summary stats (recruiter + admin scoped)       │
 │  • /files — resume download, avatar serving                    │
+│  • /riva — Riva candidate assistant chat (candidate-only)      │
 └─────────────────────────────────────────────────────────────────┘
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -81,6 +84,7 @@ The backend is organized into **five logical layers**:
 │  • scheduling_agent.py — Google Calendar booking               │
 │  • email_agent.py — drafts + sends transactional emails        │
 │  • reply_intent_agent.py — reads candidate replies             │
+│  • riva_agent.py — candidate chat assistant (7th agent)        │
 │  • runner.py — background trigger functions                    │
 └─────────────────────────────────────────────────────────────────┘
                               ▼
@@ -153,7 +157,8 @@ recruitflow-backend/
 │   │   ├── admin.py                → recruiter/job/candidate management
 │   │   ├── ats.py                  → GET /ats/pipeline, WebSocket /ats/ws
 │   │   ├── analytics.py            → /analytics/summary, /admin/analytics/summary
-│   │   └── files.py                → resume download, avatar serving
+│   │   ├── files.py                → resume download, avatar serving
+│   │   └── riva.py                 → Riva chat routes (candidate-only)
 │   ├── agents/                     → Six AI agents (OpenAI Agents SDK)
 │   │   ├── __init__.py
 │   │   ├── llm_config.py           → OpenRouter setup, set_default_openai_client()
@@ -163,6 +168,9 @@ recruitflow-backend/
 │   │   ├── scheduling_agent.py     → Google Calendar booking/rescheduling
 │   │   ├── email_agent.py          → drafts + sends transactional emails
 │   │   ├── reply_intent_agent.py   → classifies candidate email replies
+│   │   ├── riva_agent.py           → Riva, the candidate chat assistant (7th agent)
+│   │   ├── riva_context.py         → Riva's trusted run context (user, conversation)
+│   │   ├── riva_runner.py          → runs one Riva turn, logs it to agent_runs
 │   │   ├── schemas.py              → Pydantic schemas for agent tool inputs
 │   │   ├── context.py              → shared agent context (application_id, session, etc.)
 │   │   └── runner.py               → background trigger functions (run_intake_bg, run_reply_bg)
@@ -175,6 +183,7 @@ recruitflow-backend/
 │   │   ├── application.py          → candidate ↔ job link, score, status
 │   │   ├── interview.py            → google_event_id, scheduled times, status
 │   │   ├── email_log.py            → every email sent
+│   │   ├── chat.py                 → Riva conversations + messages
 │   │   └── agent_run.py            → audit trail of all agent executions
 │   ├── services/                   → Business logic + external integrations
 │   │   ├── __init__.py
@@ -204,7 +213,8 @@ recruitflow-backend/
 │           ├── env.py
 │           └── versions/
 │               ├── 1c27c78fde99_initial_schema.py
-│               └── b2f4a1c9d3e7_add_user_picture_gender.py
+│               ├── b2f4a1c9d3e7_add_user_picture_gender.py
+│               └── c7a3e9b15d24_add_chat_tables.py
 ├── Dockerfile                      → container image (Render + local docker run)
 ├── .dockerignore                   → keeps venv/caches/secrets out of the image
 ├── render.yaml                     → Render Blueprint (Docker web service, env vars)
@@ -317,6 +327,22 @@ Returns: total applications, shortlisted, interview pipeline, hired, recruitment
 
 > The avatar route is deliberately declared **before** the catch-all so candidate profile images don't 401.
 
+### `riva.py` — Riva Candidate Assistant (`/riva`)
+
+Every route is locked to a signed-in candidate via `require_role(UserRole.candidate)` — a
+recruiter or admin cookie gets **403**, no cookie gets **401**. `POST /riva/messages` is
+additionally rate-limited **per user** (20 turns/minute), since each turn costs an LLM call.
+
+| Method | Endpoint | Role | Purpose |
+|---|---|---|---|
+| `GET` | `/riva/conversation` | Candidate | The candidate's rolling conversation + full transcript |
+| `POST` | `/riva/messages` | Candidate | Send one message, get Riva's reply (+ a `submission` hand-off object when the draft is ready) |
+| `POST` | `/riva/outcome` | Candidate | The browser reports the result of the real application submission so Riva can acknowledge it |
+| `DELETE` | `/riva/conversation` | Candidate | Clear the transcript and draft, start over |
+
+> **No file upload here, by design.** Riva never receives résumé bytes and never creates an
+> application. The only route that accepts a résumé is the pre-existing `POST /applications`.
+
 ---
 
 ## The Six AI Agents
@@ -383,6 +409,71 @@ In all three cases the Email Agent sends a follow-up confirming the outcome, and
 
 ---
 
+## Riva — The Candidate Assistant Agent
+
+**Riva** is the platform's **7th agent** and the only candidate-facing one: a conversational
+career assistant that powers the chat widget in the **Candidate Dashboard** of
+`recruitflow-website`. She is built on the same OpenAI Agents SDK and the same
+`get_agent_model()` LLM wiring as the other six, but she is **deliberately isolated** from
+them.
+
+### Strict Separation
+
+Riva imports **nothing** from `orchestrator_agent.py`, `resume_parser_agent.py`,
+`scoring_agent.py`, `scheduling_agent.py`, `email_agent.py`, `reply_intent_agent.py`,
+`runner.py`, `context.py`, `intake_service.py`, or `storage_service.py`. She has her own
+agent, context, and runner modules, reads only `Job`, `Application`, `Candidate` and her own
+chat tables, and never calls `Runner.run` on another agent. The six recruiter-facing agents
+are untouched by her existence, and she has no relationship with the recruiter or admin
+dashboards.
+
+### Tools (`riva_agent.py`)
+
+All tools are sync, flat-parameter, string-returning, and open their own `Session(engine)`.
+Every identity they act on comes from the trusted `RivaContext` (`riva_context.py`) — built
+server-side from the JWT cookie — never from model arguments, so Riva can only ever read the
+signed-in candidate's own data.
+
+| Tool | Purpose |
+|---|---|
+| `list_open_jobs()` | All currently **open** jobs the candidate can apply to |
+| `get_job_details(job_query)` | Resolves one open job by title or id → full description + required skills |
+| `get_my_applications()` | The candidate's **own** applications with status and applied date |
+| `save_application_draft(full_name, years_experience, job_query)` | Merges collected fields into `chat_conversations.draft`; resolves `job_query` to a real open `job_id` and refuses unknown roles |
+| `request_confirmation()` | Returns the draft plus what is still missing, so Riva can read it back before asking for a yes |
+| `mark_ready_to_submit()` | Flips `draft.ready` — **writes no application**; refuses while job, name, or résumé is missing |
+
+### She Cannot Submit — By Construction
+
+Riva has **no tool that can create an application**, so even a fully jailbroken prompt cannot
+make one. `mark_ready_to_submit()` only sets a flag; `POST /riva/messages` turns that flag
+into a `submission` object `{job_id, full_name, email, job_title}` in the HTTP response, and
+the **browser** then performs the ordinary apply request against the existing
+`POST /applications` endpoint — same route, same multipart payload, same candidate cookie as
+the public web form — carrying the résumé file it has held in memory all along. From the
+backend's point of view a Riva application is indistinguishable from a web-form one, and it
+triggers the same unchanged six-agent pipeline. The candidate's browser then calls
+`POST /riva/outcome` so Riva can confirm the result (or explain a duplicate/closed-job error)
+in chat.
+
+### Turn Lifecycle (`riva_runner.py`)
+
+`run_riva_turn()` builds a fresh agent per turn, feeds it a trusted preamble plus a bounded
+window of the recent transcript, and awaits `Runner.run(...)` inside the request — the
+candidate is waiting for the reply, so no background work is spawned. LLM or provider
+failures are caught and turned into a graceful apology message rather than a 500, and every
+turn is logged to `agent_runs` under `agent_name="Riva"`, so Riva's activity shows up
+in the Admin Dashboard's agent log automatically.
+
+### Persistence
+
+Two tables (`app/models/chat.py`) hold the conversation, so the transcript and any
+half-finished draft survive logout: `chat_conversations` (one per candidate, plus the JSON
+`draft`) and `chat_messages` (the `user`/`assistant` transcript). The résumé is **never**
+stored here — only its filename, as a marker that an attachment exists in the browser.
+
+---
+
 ## Services Layer
 
 The `services/` directory holds all business logic and external integrations, keeping routers thin and agents focused on decisions rather than plumbing.
@@ -427,6 +518,16 @@ Ten SQLModel tables under `app/models/`. All primary keys are UUIDs; timestamps 
 | **email_log.py** | `application_id` (FK), `type`, `sent_at`, `status` (sent/failed/replied) |
 | **agent_run.py** | `agent_name`, `application_id` (nullable FK), `input_summary`, `output_summary`, `handed_off_to`, `status` |
 
+### Riva Chat Tables (`chat.py`)
+
+Two additional tables added with the Riva assistant. They are **purely additive** — no
+existing table, column, or enum was altered to introduce them.
+
+| Table | Key Fields |
+|---|---|
+| **chat_conversations** | `id` (UUID PK), `user_id` (FK → users, indexed), `draft` (JSON — the in-flight application draft), `created_at`/`updated_at` |
+| **chat_messages** | `id` (UUID PK), `conversation_id` (FK → chat_conversations, indexed), `role` (`user` / `assistant`), `content`, `created_at` |
+
 ### Application Status Lifecycle
 ```
 received → parsed → scored → shortlisted ─┬─▶ interview_scheduled → interview_completed → offer → hired
@@ -443,6 +544,7 @@ Schema is version-controlled with **Alembic** (`app/db/migrations/`).
 |---|---|
 | `1c27c78fde99` | Initial schema — all ten core tables |
 | `b2f4a1c9d3e7` | Adds `picture_url` and `gender` columns to `users` |
+| `c7a3e9b15d24` | Adds the Riva chat tables — `chat_conversations` and `chat_messages` |
 
 **Common commands:**
 ```bash

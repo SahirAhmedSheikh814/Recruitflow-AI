@@ -159,6 +159,14 @@ The audit heart of the platform. A searchable, chronological timeline drawn from
 
 This is how an admin proves *why* any candidate was scored, scheduled, emailed, or rejected — full traceability for every autonomous action.
 
+> **Riva Agent runs appear here too.** **Riva** is RecruitFlow AI's 7th agent — a
+> candidate-facing conversational assistant embedded in the Candidate Dashboard of the career
+> website (see [`recruitflow-website/README.md`](../recruitflow-website/README.md)). She is
+> strictly candidate-only and has no presence in this dashboard, but because the log reads
+> `agent_runs` unfiltered, every one of her conversation turns is recorded under
+> `agent_name = "Riva"` and is auditable here alongside the other six agents. No change
+> to this dashboard was needed for that.
+
 ### `/login` — Admin Login (`app/(auth)/login/page.tsx`)
 Email/password login. On success the backend sets the `admin_` cookie pair and the admin lands on the global dashboard.
 

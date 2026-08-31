@@ -181,6 +181,7 @@ The diagram below shows how RecruitFlow AI serves all three stakeholders from on
 - **Real-time status tracking** — Watch your application move through the pipeline from *Received* → *Scored* → *Shortlisted* → *Interview Scheduled* in your personal dashboard.
 - **Automatic interview booking** — When you're selected, the system checks the recruiter's calendar, proposes a time, and sends you a calendar invite — no back-and-forth.
 - **Email reply understanding** — Reply to an interview invite with "I can't make it, can we reschedule?" and the system reads your intent, cancels the old slot, books a new one, and confirms automatically.
+- **Riva, your AI Career Assistant** — A conversational chatbot embedded in the Candidate Dashboard. Riva can list open roles, explain a job, check the status of your applications, and walk you through applying entirely in chat — you just attach your résumé with the paperclip. See [Riva — The Candidate Assistant](#riva--the-candidate-assistant-7th-agent).
 
 ### For Recruiters
 - **Multi-channel intake** — Applications land from your career site, a dedicated email inbox, LinkedIn forwarding, and Google Forms — all into one pipeline.
@@ -311,6 +312,26 @@ RecruitFlow AI uses the **OpenAI Agents SDK** to build a team of specialist agen
 - **<60** — Not Recommended
 
 All agent runs are logged to the `agent_runs` table with input/output summaries, status (success/failed), and which agent was handed off to next. The Admin Dashboard exposes this log as a searchable audit trail.
+
+### Riva — The Candidate Assistant (7th Agent)
+
+Beyond the six recruiter-facing agents that power the screening pipeline, RecruitFlow AI ships a **seventh agent — Riva**, a candidate-facing conversational assistant embedded in the **Candidate Dashboard** (`/portal/*`) of the career website. Riva is built on the same **OpenAI Agents SDK** and shares the platform's LLM (`openai/gpt-4o-mini` via OpenRouter), but she is deliberately kept **separate from the recruiter/admin agents**: she never imports, calls, or hands off to any of the six, and she is only ever visible to a signed-in candidate.
+
+**What Riva does** — through natural chat, she can:
+- **List open jobs** the candidate can apply to
+- **Explain a role** — pull a job's full description and required skills
+- **Check application status** — report on the candidate's own existing applications
+- **Guide an application end-to-end** — collect the job, the candidate's name, and their attached résumé, echo the details back for confirmation, and mark the draft ready
+
+**How she stays safe by design** — Riva has **no tool that can create an application**. Her strongest action, `mark_ready_to_submit`, merely flips a `ready` flag on the conversation draft. When that happens, the browser submits the collected details to the **exact same `POST /applications` endpoint the web apply form uses**, with the candidate's own session cookie and the résumé File held in browser memory. The résumé bytes never pass through Riva. Every tool reads the candidate's identity from a trusted server-side context (never the model), so Riva can only ever act on the signed-in candidate's own data.
+
+| Aspect | Detail |
+|---|---|
+| **Scope** | Candidate-only; mounted in the Candidate Dashboard, invisible to unauthenticated users |
+| **Tools** | `list_open_jobs()`, `get_job_details()`, `get_my_applications()`, `save_application_draft()`, `request_confirmation()`, `mark_ready_to_submit()` |
+| **Backend** | `app/agents/riva_agent.py`, `riva_context.py`, `riva_runner.py`; API in `app/api/riva.py`; persistence in `chat_conversations` / `chat_messages` |
+| **Frontend** | `components/riva/*` chat widget + `lib/riva.ts` client, in `recruitflow-website` |
+| **Submission** | Never server-side — the browser calls the existing `POST /applications` path |
 
 ---
 

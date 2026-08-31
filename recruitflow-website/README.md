@@ -22,11 +22,12 @@
 4. [The Public Career Website](#the-public-career-website)
 5. [Authentication](#authentication)
 6. [The Candidate Portal](#the-candidate-portal)
-7. [Component Library](#component-library)
-8. [API Client](#api-client)
-9. [Design System](#design-system)
-10. [Local Development](#local-development)
-11. [Deployment](#deployment)
+7. [Riva — Your AI Career Assistant](#riva--your-ai-career-assistant)
+8. [Component Library](#component-library)
+9. [API Client](#api-client)
+10. [Design System](#design-system)
+11. [Local Development](#local-development)
+12. [Deployment](#deployment)
 
 ---
 
@@ -100,9 +101,11 @@ recruitflow-website/
 ├── components/
 │   ├── site/                         → public site components
 │   ├── dashboard/                    → portal shell + nav
+│   ├── riva/                         → Riva AI assistant chat widget
 │   └── ui/                           → shared UI primitives
 ├── lib/
 │   ├── api.ts                        → backend API client
+│   ├── riva.ts                       → Riva chat API client
 │   ├── jobs.ts                       → job data helpers
 │   └── jwt.ts                        → JWT decode helper (proxy guard)
 ├── proxy.ts                          → route guard for /portal/*
@@ -192,6 +195,62 @@ Logged-in candidates can browse (`jobs/page.tsx`), view (`jobs/[id]/page.tsx`), 
 
 ---
 
+## Riva — Your AI Career Assistant
+
+**Riva** is RecruitFlow AI's **7th AI agent** — a conversational assistant built with the
+**OpenAI Agents SDK** and embedded directly in the **Candidate Dashboard**. She is mounted
+once in `app/portal/layout.tsx`, so she appears on every portal page as a floating chat
+launcher in the bottom-right corner, and **nowhere else** — never on the public career
+site, never on `/login` or `/signup`. Only a signed-in candidate can see or talk to her.
+
+### What Riva Can Do
+
+| Ask her | She does |
+|---|---|
+| *"What roles are currently open?"* | Reads the live open jobs straight from the database |
+| *"Tell me about the Frontend Engineer role"* | Returns that job's full description and required skills |
+| *"Where's my application?"* | Reports the status of the candidate's **own** applications |
+| *"I need help applying for a job"* | Walks through the application conversationally, then hands off to the real submission endpoint |
+
+### Applying Through Chat
+
+Riva collects the application in conversation — which open role, the candidate's name, and
+their résumé (attached with the **paperclip** in the chat box, `.pdf` or `.docx`). She then
+reads the details back and asks for an explicit confirmation before anything is submitted.
+
+The critical design point: **Riva never submits the application herself.** When the draft is
+confirmed, the backend returns a `submission` object and the *widget* performs the ordinary
+apply request — the same exported `submitApplication(FormData)` call, hitting the same
+`POST /applications` endpoint, with the same cookies, that `ApplyForm` uses on the public
+site. The résumé file stays in browser memory the whole time and is uploaded only by that
+one request, so a chat-sourced application is indistinguishable from a web-form one and
+triggers the exact same six-agent pipeline (confirmation email → parse → score → recruiter
+dashboard). The widget then reports the result back so Riva can confirm it in the chat.
+
+### Conversation Persistence
+
+Every turn is persisted server-side against the candidate's account, so the transcript —
+and any half-finished application draft — is still there on the next login. The chat header
+has a reset control that clears the conversation and starts fresh.
+
+### Components (`components/riva/`)
+
+| Component | Purpose |
+|---|---|
+| **RivaWidget** | The whole feature: launcher FAB, chat panel, transcript state, the attached résumé `File`, and the hand-off to `submitApplication()` |
+| **RivaHeader** | Panel header — Riva's avatar, title, reset and close controls |
+| **RivaMessage** | One chat bubble — Markdown for Riva, plain text for the candidate, plus the attached-résumé file bubble |
+| **RivaMarkdown** | Safe Markdown renderer (escapes first) for bold, lists, headings, inline code and links |
+| **RivaComposer** | Auto-expanding textarea (Enter sends, Shift+Enter newline), paperclip file picker with PDF/DOCX validation, send button |
+| **RivaSuggestions** | Starter prompt chips shown on an empty conversation |
+| **RivaTyping** | Three-dot indicator while Riva is thinking |
+
+Riva's avatar lives at `public/logo/chatbot-avatar.svg`. The widget is layered above page
+content (`z-[70]`/`z-[80]`) but below the backend-wake banner, honours
+`prefers-reduced-motion`, and is fixed to the bottom-right at every breakpoint.
+
+---
+
 ## Component Library
 
 ### Site Components (`components/site/`)
@@ -215,6 +274,11 @@ Logged-in candidates can browse (`jobs/page.tsx`), view (`jobs/[id]/page.tsx`), 
 | **DashboardShell** | Portal layout — sidebar nav + top bar with `Avatar` and logout |
 | **NavIcons** | Portal nav icon set |
 
+### Riva Assistant (`components/riva/`)
+| Component | Purpose |
+|---|---|
+| **RivaWidget / RivaHeader / RivaMessage / RivaMarkdown / RivaComposer / RivaSuggestions / RivaTyping** | The Riva AI career assistant chat widget — see [Riva — Your AI Career Assistant](#riva--your-ai-career-assistant) |
+
 ### UI Primitives (`components/ui/`)
 | Component | Purpose |
 |---|---|
@@ -232,6 +296,11 @@ Logged-in candidates can browse (`jobs/page.tsx`), view (`jobs/[id]/page.tsx`), 
 - **Interviews:** `getMyInterviews()`, `getInterviewByApplication(id)`
 - **Profile:** `uploadProfilePicture(file)`, `updateProfileGender(gender)`
 - **Jobs:** public job fetch helpers (`lib/jobs.ts`)
+
+`lib/riva.ts` — the Riva chat client, built on the same `apiFetch` transport (cookie auth,
+silent refresh, cold-start retries): `getRivaConversation()`, `sendRivaMessage(content, resumeFilename?)`,
+`reportRivaOutcome(...)`, `clearRivaConversation()`. Note there is **no** résumé-upload call
+here — the file goes only to `submitApplication()` in `lib/api.ts`.
 
 ---
 
